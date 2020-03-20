@@ -1,0 +1,156 @@
+---
+title: "Covid-19-GIS"
+output:
+  html_document:
+    code_folding: "hide"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, include=FALSE}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(plotly)
+library(leaflet)
+library(ggmap)
+library(httr)
+library(purrr)
+library(tidyr)
+library(leafpop)
+library(htmltools)
+library(htmlwidgets)
+
+as.character.htmlwidget <- function(x, ...) {
+  htmltools::HTML(
+    htmltools:::as.character.shiny.tag.list(
+      htmlwidgets:::as.tags.htmlwidget(
+        x
+      ),
+      ...
+    )
+  )
+}
+
+add_deps <- function(dtbl, name, pkg = name) {
+  tagList(
+    dtbl,
+    htmlwidgets::getDependency(name, pkg)
+  )
+}
+```
+
+### Read COVID-19 data
+```{r}
+data <- read_csv("../COVID-19/covid_19_data.csv")
+```
+
+### Some data transformations to make getting geocodes easier
+```{r}
+# get unique locations
+locations <- data %>%
+  rename(state = `Province/State`, country = `Country/Region`) %>%
+  group_by(state, country) %>%
+  summarise(
+    total_cases = sum(Confirmed),
+    total_deaths = sum(Deaths),
+    total_recovered = sum(Recovered)
+  )
+
+# clean_states <- locations %>%
+#   group_by(state) %>%
+#   summarise(n = length(unique(country))) %>%
+#   filter(n == 1) %>%
+#   select(state) %>%
+#   unlist()
+# 
+# # get lat lon for states
+# geo_info <- lapply(clean_states, function(x){
+#   geo <- tryCatch(
+#     geocode(x),
+#     error = function(e) {
+#       return(tibble(lon = NA, lat = NA))
+#     },
+#     warning = function(w) {
+#       return(tibble(lon = NA, lat = NA))
+#     }
+#   )
+#   list(
+#     state = x,
+#     lon = geo$lon,
+#     lat = geo$lat
+#   )
+# })
+# 
+# geo_info_df <- lapply(geo_info, function(x){
+#   tibble(state = x$state, lon = x$lon, lat = x$lat)
+#   }
+# ) %>%
+#   bind_rows()
+# 
+# write_csv(geo_info_df, path = "data/covid-19_geo_info.csv")
+```
+
+### Prepare data for plotting map
+
+```{r}
+# combine location with data
+loc <- read_csv("data/covid-19_geo_info.csv") %>%
+  filter(!is.na(lon) | !is.na(lat))
+
+plt_data <- locations %>%
+  left_join(loc, by = "state") %>%
+  group_by(lon, lat) %>%
+  summarise(
+    country = unique(country)[1],
+    state = unique(state)[1],
+    total_cases = sum(total_cases),
+    total_deaths = sum(total_deaths),
+    total_recovered = sum(total_recovered)
+  )
+
+barplot_data <- plt_data %>%
+  ungroup() %>%
+  select(state, lon, lat, total_cases, total_deaths, total_recovered) %>%
+  gather(key = case_type, value = n, -lon, -lat, -state)
+```
+
+### Plot the map
+
+```{r}
+leaflet(plt_data) %>% addTiles() %>%
+  addCircleMarkers(
+    ~lon, ~lat,
+    popup = lapply(
+      plt_data$state,
+      function(i) {
+        x = barplot_data %>% filter(state == i)
+        plt <- ggplot(x, aes(x = case_type, y = n, fill = case_type)) + 
+          geom_bar(stat = "identity", width = 0.2) + 
+          coord_flip() + 
+          theme_minimal() +
+          ggtitle(paste0("Covid-19 count for ", unique(x$state)))
+        ggplotly(plt) %>%
+          as.tags() %>%
+          {tags$div(style="width:600px;height:400px", .)} %>%
+          as.character()
+      }
+    ),
+    clusterOption=markerClusterOptions(),
+    label = ~as.character(state),
+    radius = ~ log(total_cases)
+  ) %>%
+  onRender(
+"
+function(el,x) {
+  this.on('popupopen', function() {HTMLWidgets.staticRender();})
+}
+") %>%
+  add_deps("plotly") %>%
+  htmltools::attachDependencies(plotly:::plotlyMainBundle(), append = TRUE) %>%
+  htmltools::attachDependencies(crosstalk::crosstalkLibs(), append = TRUE) %>%
+  browsable()
+```
