@@ -132,6 +132,7 @@ leaflet(plt_data) %>% addTiles() %>%
           geom_bar(stat = "identity", width = 0.2) + 
           coord_flip() + 
           theme_minimal() +
+          guides(fill = FALSE) +
           ggtitle(paste0("Covid-19 count for ", unique(x$state)))
         ggplotly(plt) %>%
           as.tags() %>%
@@ -154,3 +155,44 @@ function(el,x) {
   htmltools::attachDependencies(crosstalk::crosstalkLibs(), append = TRUE) %>%
   browsable()
 ```
+
+```{r}
+leaflet(plt_data) %>% addTiles() %>%
+  addCircleMarkers(
+    ~lon, ~lat,
+    popup = lapply(
+      plt_data$state,
+      function(i) {
+        x = barplot_data %>% filter(state == i)
+        plt <- ggplot(x, aes(x = state, y = n, fill = case_type)) + 
+          geom_col(width = 0.3) + 
+          coord_flip() + 
+          theme_minimal() +
+          ggtitle(paste0("Covid-19 count for ", unique(x$state))) +
+          guides(
+            fill = FALSE
+          )
+        ggplotly(plt) %>%
+          as.tags() %>%
+          {tags$div(style="width:600px;", .)} %>%
+          as.character()
+      }
+    ),
+    # clusterOption=markerClusterOptions(),
+    label = ~as.character(state),
+    radius = ~ log(total_cases)
+  ) %>%
+  onRender(
+"
+function(el,x) {
+  this.on('popupopen', function() {HTMLWidgets.staticRender();})
+}
+") %>%
+  add_deps("plotly") %>%
+  htmltools::attachDependencies(plotly:::plotlyMainBundle(), append = TRUE) %>%
+  htmltools::attachDependencies(crosstalk::crosstalkLibs(), append = TRUE) %>%
+  browsable()
+
+# width:600px;
+```
+
