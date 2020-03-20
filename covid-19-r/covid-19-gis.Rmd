@@ -120,7 +120,7 @@ barplot_data <- plt_data %>%
 
 ### Plot the map
 
-```{r}
+```{r, fig.height=20}
 leaflet(plt_data) %>% addTiles() %>%
   addCircleMarkers(
     ~lon, ~lat,
